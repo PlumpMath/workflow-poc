@@ -4,9 +4,9 @@
 
 
 (def state (atom {}))
-(def step0 (ref {}))
-(def step1 (ref {}))
-(def step2 (ref {}))
+(def step0 (ref []))
+(def step1 (ref []))
+(def step2 (ref []))
 (def finished (ref []))
 (def display-state? (atom true))
 
@@ -14,22 +14,50 @@
   (fn []
     (go (while true
           (let [input (<! input-ch)
-                task-result (task-fn input)]
-            (update-state-fn task-result) ;; possibly in a future
-            (>! output-ch task-result))))))
+                task-result (task-fn input)
+                updated-task (update-state-fn task-result)]
+            ;; possibly in a future
+            (->> (task-fn input)
+                 (update-state-fn)
+                 (>! output-ch)))))))
 
 (defn register-work [s worker-id new-value]
   (swap! s #(assoc % worker-id (conj (worker-id %) new-value)))
   )
 
 
-(defn move-workflow-step [old-stage new-stage worker-id value]
-  (dosync
-   (alter new-stage assoc worker-id value)
-   (alter old-stage dissoc worker-id)))
+(defn move-workflow-step [old-stage new-stage worker-id {payload :payload
+                                                         owner :owner
+                                                         owner-history :owner-history
+                                                         :as value}]
+  (comment
+    (pprint [@step0 @step1 @step2 @finished])
+    (pprint value))
+  (let [new-val (-> value
+                    (assoc :owner worker-id)
+                    (assoc :owner-history (conj owner-history worker-id)))]
+    (dosync
+     (alter new-stage conj new-val)
+     (alter old-stage (fn [s] (->> s
+                                 (remove #(= (:payload %) payload))
+                                 (into [])))))
+    (comment
+      (pprint {:step0 @step0
+               :step1 @step1
+               :step2 @step2
+               :finished  @finished}))
+    new-val))
 
 (comment
-  (move-workflow-step step0 step1 :worker-1-1 "TEST_a"))
+  (init-workflow init-ch)
+
+  (input-event init-ch "223")
+
+  (move-workflow-step step0 step1 :worker-1-1 (first @step0))
+
+  (move-workflow-step step1 step2 :worker-2 (first @step1))
+
+  )
 
 (defn init-workflow [init-ch]
   (let [processing-fn #(do
@@ -66,11 +94,12 @@
     (thread (second-worker))
     (go
       (while true
-        (comment)
-        (pprint @state)
-        (let [init-val (<! init-ch)]
+        (comment
+          (pprint @state))
+        (let [init-payload (<! init-ch)
+              init-val {:payload init-payload :owner-history []}]
           (dosync
-           (alter step0 assoc :workflow init-val))
+           (alter step0 conj init-val))
 
           (>! first-ch init-val))
         (let [result (<! third-ch)]
@@ -79,13 +108,11 @@
           (println ">>"  result))))))
 
 (comment
-  first-worker (worker-fn first-ch second-ch processing-fn
-                                #(register-work state :worker-1-1 %))
+  (init-workflow init-ch)
+  ;;run some events through
+  (doseq [i (range 1 21)] (future (input-event init-ch (str  "TEST_" i))))
+  )
 
-  (thread ((worker-fn first-ch second-ch identity
-                          #(register-work state :worker-2-1 %))))
-
-  (thread (first-worker)))
 
 (comment
   (let [bf (chan (buffer 3))]
