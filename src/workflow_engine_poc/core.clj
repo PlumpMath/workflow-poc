@@ -25,14 +25,16 @@
   (swap! s #(assoc % worker-id (conj (worker-id %) new-value)))
   )
 
+(defn display-state []
+  (pprint {:step0 @step0
+               :step1 @step1
+               :step2 @step2
+               :finished  @finished}))
 
 (defn move-workflow-step [old-stage new-stage worker-id {payload :payload
                                                          owner :owner
                                                          owner-history :owner-history
                                                          :as value}]
-  (comment
-    (pprint [@step0 @step1 @step2 @finished])
-    (pprint value))
   (let [new-val (-> value
                     (assoc :owner worker-id)
                     (assoc :owner-history (conj owner-history worker-id)))]
@@ -41,11 +43,7 @@
      (alter old-stage (fn [s] (->> s
                                  (remove #(= (:payload %) payload))
                                  (into [])))))
-    (comment
-      (pprint {:step0 @step0
-               :step1 @step1
-               :step2 @step2
-               :finished  @finished}))
+    (comment (display-state))
     new-val))
 
 (comment
@@ -61,7 +59,6 @@
 
 (defn init-workflow [init-ch]
   (let [processing-fn #(do
-                         (println %)
                          (Thread/sleep 3000)
                          %)
         first-ch (chan (buffer 3))
@@ -104,13 +101,14 @@
           (>! first-ch init-val))
         (let [result (<! third-ch)]
           (dosync
-           (commute finished conj result))
-          (println ">>"  result))))))
+           (commute finished conj result)))))))
 
 (comment
-  (init-workflow init-ch)
-  ;;run some events through
-  (doseq [i (range 1 21)] (future (input-event init-ch (str  "TEST_" i))))
+  (do
+    (init-workflow init-ch)
+    ;;run some events through
+    (doseq [i (range 1 21)]
+      (future (input-event init-ch (str  "TEST_" i)))))
   )
 
 
