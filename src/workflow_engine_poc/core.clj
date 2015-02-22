@@ -141,31 +141,43 @@
                             input :input
                             output :output
                             step-state :step-state} topology chan-dict]
-
-  (let [prev-step-state (-> topology
-                            input
-                            :step-state)]
+(println input)
+  (let [prev-step-state (or (-> topology
+                                input
+                                :step-state) ;; TODO find better way to handle first state
+                            :step0)]
     (map
      (fn [k]
-       (worker-fn (chan-dict input) (chan-dict output) step-fn
-                  #(do
-                     (move-workflow-step prev-step-state  step-state k  %))))
+       ( (worker-fn (chan-dict input) (chan-dict output) step-fn
+                    #(do
+                       (move-workflow-step prev-step-state  step-state k  %)))))
      (map #(keyword (str step-id %)) (range 1 (inc worker-num))))))
 
-(build-workflow-step
- (:first sample-topology)
- sample-topology
- (topology->channel-dict sample-topology init-ch))
+(comment
+  (build-workflow-step
+   (:first sample-topology)
+   sample-topology
+   (topology->channel-dict sample-topology init-ch)))
+
+(defn find-exit-chan [topology chan-dict]
+  (->> (vals topology)
+       (filter (fn [{out-ch :output}] (= out-ch :output-channel)))
+       first
+       :output
+       (chan-dict)))
+
+(comment
+  (find-exit-chan sample-topology (topology->channel-dict sample-topology init-ch)))
 
 (defn build-workflow [topology input-channel]
-  (let [chan-dict (topology->channel-dict topology->channel-dict)]
-    (doseq [{step-fn :step-fn
-             worker-num :worker-num
-             input :input
-             output :output} topology]
+  (let [chan-dict (topology->channel-dict topology init-ch)]
+    (->> (vals  topology)
+         (map #(build-workflow-step % topology chan-dict))
+         (into []))
+    (find-exit-chan topology chan-dict)))
 
-
-      )))
+(comment
+  (build-workflow sample-topology init-ch))
 
 (comment
   (do
