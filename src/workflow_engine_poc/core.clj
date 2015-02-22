@@ -7,6 +7,7 @@
 (def step0 (ref []))
 (def step1 (ref []))
 (def step2 (ref []))
+(def step3 (ref []))
 (def finished (ref []))
 (def display-state? (atom true))
 
@@ -80,14 +81,6 @@
     (thread ((first-stage-worker-factory :worker-1-2)))
     (thread ((first-stage-worker-factory :worker-1-3)))
 
-    (comment
-      (thread (while @display-state?
-                (Thread/sleep 1000)
-                (println "Current State ")
-                (pprint @state)
-                (println " ")
-                (pprint [@step0 @step1 @step2 @finished]))))
-
     (thread (second-worker))
     (go
       (while true
@@ -102,6 +95,77 @@
         (let [result (<! third-ch)]
           (dosync
            (commute finished conj result)))))))
+
+;; how about read in all keys from topology + :output-channel
+;; and create a (chan) for each of them in dictionary..
+(def sample-topology {:first {:step-fn #(do (Thread/sleep 3000)
+                                      (println "Step 1 done")
+                                      %)
+                              :id :first ;;TODO remove duplication
+                              :worker-num 3
+                              :input :init-channel
+                              :output :second
+                              :step-state step1}
+                      :second {:step-fn #(do (Thread/sleep 3000)
+                                     (println "Step 2 done")
+                                     %)
+                               :id :second ;;TODO remove duplication
+                               :worker-num 2
+                               :input :first
+                               :output :third
+                               :step-state step2}
+                      :third {:step-fn #(do (Thread/sleep 3000)
+                                     (println "Step 3 done")
+                                     %)
+                              :id :third ;;TODO remove duplication
+                              :worker-num 2
+                              :input :second
+                              :output :output-channel
+                              :step-state step3}})
+
+(defn topology->channel-dict [topology init-channel]
+  (->
+   (->> topology
+        vals
+        (mapcat (fn [{out :output in :input}] [in out]))
+        (map (fn [ch k] [k ch]) (repeat (chan (buffer 5))) )
+        (into {}))
+   (assoc :init-channel init-channel)))
+
+(comment
+  (topology->channel-dict sample-topology init-ch))
+
+(defn build-workflow-step [{step-fn :step-fn
+                            step-id :id
+                            worker-num :worker-num
+                            input :input
+                            output :output
+                            step-state :step-state} topology chan-dict]
+
+  (let [prev-step-state (-> topology
+                            input
+                            :step-state)]
+    (map
+     (fn [k]
+       (worker-fn (chan-dict input) (chan-dict output) step-fn
+                  #(do
+                     (move-workflow-step prev-step-state  step-state k  %))))
+     (map #(keyword (str step-id %)) (range 1 (inc worker-num))))))
+
+(build-workflow-step
+ (:first sample-topology)
+ sample-topology
+ (topology->channel-dict sample-topology init-ch))
+
+(defn build-workflow [topology input-channel]
+  (let [chan-dict (topology->channel-dict topology->channel-dict)]
+    (doseq [{step-fn :step-fn
+             worker-num :worker-num
+             input :input
+             output :output} topology]
+
+
+      )))
 
 (comment
   (do
