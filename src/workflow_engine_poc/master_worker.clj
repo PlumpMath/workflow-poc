@@ -10,26 +10,34 @@
              process-fn
              (>! out-ch))
         (println "Timeout, retrying"))
-      (recur))))
+      (if (not (= v :DONE))
+        (recur)))))
 
 
-(defn master []
-  (let [work (chan)]
+(defn master [n]
+  (let [work (chan 3)]
     (doto (Thread. (fn []
-                     (Thread/sleep 100)
-                     (println "Sending work")
-                     (>!! work [:work "THIS IS WORK"])))
+                     (loop [i 0]
+                       (println "Sending work")
+                       (>!! work [:work (str "THIS IS WORK ITEM_" i)])
+                       (if (< i n)
+                         (recur (inc i))
+                         (>!! work :DONE)))))
       (.start))
     work))
 
 (defn result []
   (let [out (chan)]
     (doto (Thread. (fn []
-                     (Thread/sleep 100)
-                     (println "Received: " (<!! out))))
+                     (let [r (<!! out)]
+                       (if (= r :DONE)
+                         (println "Finished processing")
+                         (do
+                           (println "Received: " r)
+                           (recur))))))
       (.start))
     out))
 
 
 (defn start-system []
-  (worker (master) (result) println))
+  (worker (master 10) (result) (fn [v] (println v) v)))
