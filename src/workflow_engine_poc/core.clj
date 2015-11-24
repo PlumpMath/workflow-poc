@@ -171,9 +171,16 @@
 
 (defn build-workflow [topology input-channel]
   (let [chan-dict (topology->channel-dict topology init-ch)]
-    (->> (vals  topology)
-         (map #(build-workflow-step % topology chan-dict))
-         (into []))
+    (comment
+      (->> (vals  topology)
+           (map #(build-workflow-step % topology chan-dict))
+           (into [])))
+    (reduce
+     (fn [w step]
+       (into w
+             (build-workflow-step step topology chan-dict)))
+     []
+     (vals topology))
     (find-exit-chan topology chan-dict)))
 
 (comment
